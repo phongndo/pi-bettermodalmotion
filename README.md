@@ -6,7 +6,7 @@ This scaffold starts from pi's `modal-editor.ts` example and turns it into a pac
 
 ## Install
 
-Install from npm once published:
+Install from npm:
 
 ```bash
 pi install npm:pi-modal-motion
@@ -36,16 +36,19 @@ When loaded in interactive pi, the extension replaces the prompt editor with the
 
 - `Escape`: insert mode → normal mode; cancels autocomplete first when it is open
 - `i` / `a` / `I` / `A`: enter insert mode before/after cursor or at line start/end
-- `o` / `O`: open a prompt line below/above and enter insert mode
+- `o` / `O`: use pi's native newline handling to open a prompt line below/above and enter insert mode
 - `h` / `j` / `k` / `l`, arrow keys, `0`, `^`, `$`, `gg`, `G`: normal-mode navigation
-- `w` / `b` / `e`: word motions
+- `w` / `W` / `b` / `B` / `e` / `E` / `ge` / `gE`: word motions
+- `f` / `t` / `F` / `T`, `;`, `,`: same-line character search motions and repeats
 - counts such as `3w`, `10j`, `2dd`, and `d3w`
 - operators: `dd`, `dw`, `d$`, `cc`, `cw`, `yy`, plus `D`, `C`, `Y`
 - register paste with `p` / `P` for characterwise and linewise yanks/deletes
 - `x` / `X`: delete character forward/backward in normal mode
 - printable unmapped keys and bracketed paste are ignored in normal/operator mode
-- control sequences such as `ctrl+c`, `ctrl+d`, Enter, and pi app keybindings still pass through
-- the editor border stays minimal and only shows `INSERT` or `NORMAL`
+- normal/operator mode blocks pi's native destructive text-editing shortcuts so edits stay under modal/register control
+- large pi paste markers are treated as atomic cells so modal edits do not corrupt hidden paste payloads
+- app-level shortcuts such as `ctrl+c`, empty-editor `ctrl+d`, Enter submit, model/thinking shortcuts, image paste, and extension shortcuts still pass through
+- the bottom editor border stays minimal, shows `INSERT` or `NORMAL`, and preserves pi's scroll indicators when prompt content is hidden
 
 ## What is included
 
@@ -86,7 +89,7 @@ npm run check
 npm run dev:pi
 ```
 
-Then use pi normally. The prompt editor should show an `INSERT`/`NORMAL` indicator in the top border.
+Then use pi normally. The prompt editor should show an `INSERT`/`NORMAL` indicator in the bottom border.
 
 ## Scripts
 
@@ -115,4 +118,4 @@ It re-validates the package, publishes to npm when `NPM_TOKEN` is configured, bu
 
 ## Next steps
 
-Next work should expand normal-mode motions beyond the initial example, explore counts/operators/text objects, and add golden tests around editor rendering and key translation.
+Next work should add user configuration for default mode/colors/keymaps, broaden edit commands and text objects, and keep adding integration tests around pi editor invariants.
