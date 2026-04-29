@@ -336,4 +336,28 @@ describe("BetterModalMotionEditor", () => {
 
     expect(editor.getText()).toBe("def\nabc");
   });
+
+  it("treats empty lines as Vim word-motion stops", () => {
+    const normalMotion = createEditor("abc\n\ndef");
+    enterNormalAtStart(normalMotion);
+    normalMotion.handleInput("w");
+
+    expect(normalMotion.getCursor()).toEqual({ line: 1, col: 0 });
+
+    const countedNormalMotion = createEditor("abc\n\ndef");
+    enterNormalAtStart(countedNormalMotion);
+    sendKeys(countedNormalMotion, ["2", "w"]);
+
+    expect(countedNormalMotion.getCursor()).toEqual({ line: 2, col: 0 });
+
+    const deleteTwoWords = createEditor("abc\n\ndef");
+    enterNormalAtStart(deleteTwoWords);
+    sendKeys(deleteTwoWords, ["d", "2", "w"]);
+
+    expect(deleteTwoWords.getText()).toBe("def");
+    expect(deleteTwoWords.getRegister()).toEqual({
+      text: "abc\n\n",
+      linewise: true,
+    });
+  });
 });

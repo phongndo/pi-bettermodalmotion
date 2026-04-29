@@ -42,8 +42,34 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, {
   granularity: "grapheme",
 });
 
+interface WordSegment {
+  readonly segment: string;
+  readonly index: number;
+  readonly emptyLine?: boolean;
+}
+
 function graphemes(text: string): Intl.SegmentData[] {
   return [...graphemeSegmenter.segment(text)];
+}
+
+function wordSegments(text: string): WordSegment[] {
+  const segments = graphemes(text).map(({ segment, index }) => ({
+    segment,
+    index,
+  }));
+
+  const result = segments.map((segment, index): WordSegment => {
+    const previous = segments[index - 1];
+    return segment.segment === "\n" && (!previous || previous.segment === "\n")
+      ? { ...segment, emptyLine: true }
+      : segment;
+  });
+
+  if (text.endsWith("\n")) {
+    result.push({ segment: "", index: text.length, emptyLine: true });
+  }
+
+  return result;
 }
 
 function safeCount(count: number): number {
@@ -55,7 +81,7 @@ function bufferText(lines: readonly string[]): string {
 }
 
 function segmentAtOrAfter(
-  segments: readonly Intl.SegmentData[],
+  segments: readonly WordSegment[],
   offset: number,
 ): number {
   const index = segments.findIndex((segment) => segment.index >= offset);
@@ -63,41 +89,53 @@ function segmentAtOrAfter(
 }
 
 function segmentBefore(
-  segments: readonly Intl.SegmentData[],
+  segments: readonly WordSegment[],
   offset: number,
 ): number {
   return segmentAtOrAfter(segments, offset) - 1;
 }
 
-function isWhitespace(segment: string | undefined): boolean {
-  return segment !== undefined && /^\s$/u.test(segment);
+function isWhitespace(segment: WordSegment | undefined): boolean {
+  return (
+    segment !== undefined && !segment.emptyLine && /^\s$/u.test(segment.segment)
+  );
 }
 
-function isKeyword(segment: string | undefined): boolean {
-  return segment !== undefined && /^[\p{Letter}\p{Number}_]+$/u.test(segment);
+function isKeyword(segment: WordSegment | undefined): boolean {
+  return (
+    segment !== undefined &&
+    !segment.emptyLine &&
+    /^[\p{Letter}\p{Number}_]+$/u.test(segment.segment)
+  );
 }
 
 function wordClass(
-  segment: string | undefined,
+  segment: WordSegment | undefined,
   mode: VimWordMode,
-): "space" | "keyword" | "punct" | "WORD" {
+): "space" | "keyword" | "punct" | "WORD" | "empty" {
+  if (!segment) return "empty";
+  if (segment.emptyLine) return "empty";
   if (isWhitespace(segment)) return "space";
   if (mode === "WORD") return "WORD";
   return isKeyword(segment) ? "keyword" : "punct";
 }
 
 function sameWordRun(
-  left: Intl.SegmentData | undefined,
-  right: Intl.SegmentData | undefined,
+  left: WordSegment | undefined,
+  right: WordSegment | undefined,
   mode: VimWordMode,
 ): boolean {
   if (!left || !right) return false;
-  const leftClass = wordClass(left.segment, mode);
-  return leftClass !== "space" && leftClass === wordClass(right.segment, mode);
+  const leftClass = wordClass(left, mode);
+  return (
+    leftClass !== "space" &&
+    leftClass !== "empty" &&
+    leftClass === wordClass(right, mode)
+  );
 }
 
 function isRunEnd(
-  segments: readonly Intl.SegmentData[],
+  segments: readonly WordSegment[],
   index: number,
   mode: VimWordMode,
 ): boolean {
@@ -110,12 +148,12 @@ function nextWordStartOffset(
   count: number,
   mode: VimWordMode,
 ): number {
-  const segments = graphemes(text);
+  const segments = wordSegments(text);
   if (segments.length === 0) return 0;
 
   let index = segmentAtOrAfter(segments, Math.max(0, offset));
   for (let step = 0; step < safeCount(count); step += 1) {
-    const currentClass = wordClass(segments[index]?.segment, mode);
+    const currentClass = wordClass(segments[index], mode);
     if (currentClass !== "space") {
       while (sameWordRun(segments[index], segments[index + 1], mode)) {
         index += 1;
@@ -123,7 +161,7 @@ function nextWordStartOffset(
       if (index < segments.length) index += 1;
     }
 
-    while (wordClass(segments[index]?.segment, mode) === "space") {
+    while (wordClass(segments[index], mode) === "space") {
       index += 1;
     }
   }
@@ -137,17 +175,14 @@ function previousWordStartOffset(
   count: number,
   mode: VimWordMode,
 ): number {
-  const segments = graphemes(text);
+  const segments = wordSegments(text);
   if (segments.length === 0) return 0;
 
   let index = segmentBefore(segments, Math.max(0, offset));
   if (index < 0) return 0;
 
   for (let step = 0; step < safeCount(count); step += 1) {
-    while (
-      index >= 0 &&
-      wordClass(segments[index]?.segment, mode) === "space"
-    ) {
+    while (index >= 0 && wordClass(segments[index], mode) === "space") {
       index -= 1;
     }
     if (index < 0) return 0;
@@ -168,7 +203,7 @@ function wordEndOffset(
   count: number,
   mode: VimWordMode,
 ): number {
-  const segments = graphemes(text);
+  const segments = wordSegments(text);
   if (segments.length === 0) return 0;
 
   let index = segmentAtOrAfter(segments, Math.max(0, offset));
@@ -177,7 +212,7 @@ function wordEndOffset(
       index < segments.length &&
       step === 0 &&
       segments[index]?.index === offset &&
-      wordClass(segments[index]?.segment, mode) !== "space" &&
+      wordClass(segments[index], mode) !== "space" &&
       isRunEnd(segments, index, mode)
     ) {
       index += 1;
@@ -185,7 +220,7 @@ function wordEndOffset(
       index += 1;
     }
 
-    while (wordClass(segments[index]?.segment, mode) === "space") {
+    while (wordClass(segments[index], mode) === "space") {
       index += 1;
     }
     if (index >= segments.length) return text.length;
@@ -204,13 +239,13 @@ function changeWordEndOffset(
   count: number,
   mode: VimWordMode,
 ): number {
-  const segments = graphemes(text);
+  const segments = wordSegments(text);
   if (segments.length === 0) return 0;
 
   let index = segmentAtOrAfter(segments, Math.max(0, offset));
   const normalizedCount = safeCount(count);
   for (let step = 0; step < normalizedCount; step += 1) {
-    while (wordClass(segments[index]?.segment, mode) === "space") {
+    while (wordClass(segments[index], mode) === "space") {
       index += 1;
     }
     if (index >= segments.length) return text.length;
@@ -228,7 +263,7 @@ function changeWordEndOffset(
 function isNonBlankAt(lines: readonly string[], point: BufferPoint): boolean {
   const line = ensureLines(lines)[point.line] ?? "";
   const segment = graphemes(line.slice(point.col))[0]?.segment;
-  return segment !== undefined && !isWhitespace(segment);
+  return segment !== undefined && !/^\s$/u.test(segment);
 }
 
 function adjustOperatorWordEndOfLine(
@@ -494,6 +529,21 @@ export function vimOperatorRangeFromMotion(
           range: { start: target, end: pointAfter(safeLines, start) },
           linewise: false,
         };
+  }
+
+  if (
+    movesForward &&
+    target.line > start.line &&
+    target.col === 0 &&
+    start.col <= firstNonBlankCol(safeLines[start.line] ?? "")
+  ) {
+    return {
+      range: {
+        start: { line: start.line, col: 0 },
+        end: { line: target.line - 1, col: 0 },
+      },
+      linewise: true,
+    };
   }
 
   if (
