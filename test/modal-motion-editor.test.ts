@@ -411,4 +411,104 @@ describe("BetterModalMotionEditor", () => {
       linewise: false,
     });
   });
+
+  it("supports Vim f/t/F/T character-search motions", () => {
+    const findForward = createEditor("abc def abc");
+    enterNormalAtStart(findForward);
+    sendKeys(findForward, ["f", "c"]);
+
+    expect(findForward.getCursor()).toEqual({ line: 0, col: 2 });
+
+    const findForwardCount = createEditor("abc def abc");
+    enterNormalAtStart(findForwardCount);
+    sendKeys(findForwardCount, ["2", "f", "c"]);
+
+    expect(findForwardCount.getCursor()).toEqual({ line: 0, col: 10 });
+
+    const tillForward = createEditor("abc def abc");
+    enterNormalAtStart(tillForward);
+    sendKeys(tillForward, ["t", "c"]);
+
+    expect(tillForward.getCursor()).toEqual({ line: 0, col: 1 });
+
+    const findBackward = createEditor("abc def abc");
+    enterNormalAtStart(findBackward);
+    sendKeys(findBackward, ["2", "f", "c", "F", "c"]);
+
+    expect(findBackward.getCursor()).toEqual({ line: 0, col: 2 });
+
+    const tillBackward = createEditor("abc def abc");
+    enterNormalAtStart(tillBackward);
+    sendKeys(tillBackward, ["2", "f", "c", "T", "c"]);
+
+    expect(tillBackward.getCursor()).toEqual({ line: 0, col: 3 });
+  });
+
+  it("supports f/t/F/T as operator motions", () => {
+    const deleteFindForward = createEditor("abc def abc");
+    enterNormalAtStart(deleteFindForward);
+    sendKeys(deleteFindForward, ["d", "f", "c"]);
+
+    expect(deleteFindForward.getText()).toBe(" def abc");
+    expect(deleteFindForward.getRegister()).toEqual({
+      text: "abc",
+      linewise: false,
+    });
+
+    const deleteTillForward = createEditor("abc def abc");
+    enterNormalAtStart(deleteTillForward);
+    sendKeys(deleteTillForward, ["d", "t", "c"]);
+
+    expect(deleteTillForward.getText()).toBe("c def abc");
+    expect(deleteTillForward.getRegister()).toEqual({
+      text: "ab",
+      linewise: false,
+    });
+
+    const deleteFindBackward = createEditor("abc def abc");
+    enterNormalAtStart(deleteFindBackward);
+    sendKeys(deleteFindBackward, ["2", "f", "c", "d", "F", "c"]);
+
+    expect(deleteFindBackward.getText()).toBe("abc");
+    expect(deleteFindBackward.getRegister()).toEqual({
+      text: "c def ab",
+      linewise: false,
+    });
+
+    const deleteTillBackward = createEditor("abc def abc");
+    enterNormalAtStart(deleteTillBackward);
+    sendKeys(deleteTillBackward, ["2", "f", "c", "d", "T", "c"]);
+
+    expect(deleteTillBackward.getText()).toBe("abcc");
+    expect(deleteTillBackward.getRegister()).toEqual({
+      text: " def ab",
+      linewise: false,
+    });
+  });
+
+  it("supports ; and , repeats for character search", () => {
+    const editor = createEditor("abc def abc");
+    enterNormalAtStart(editor);
+    sendKeys(editor, ["f", "c", ";"]);
+
+    expect(editor.getCursor()).toEqual({ line: 0, col: 10 });
+
+    editor.handleInput(",");
+
+    expect(editor.getCursor()).toEqual({ line: 0, col: 2 });
+
+    editor.handleInput(";");
+
+    expect(editor.getCursor()).toEqual({ line: 0, col: 10 });
+  });
+
+  it("leaves cursor and text unchanged when character search has no match", () => {
+    const editor = createEditor("abc");
+    enterNormalAtStart(editor);
+    sendKeys(editor, ["d", "f", "x"]);
+
+    expect(editor.getText()).toBe("abc");
+    expect(editor.getCursor()).toEqual({ line: 0, col: 0 });
+    expect(editor.getRegister()).toBeUndefined();
+  });
 });

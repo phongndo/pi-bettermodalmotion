@@ -10,6 +10,7 @@ import {
   moveRightInNormalLine,
   nextGraphemeEnd,
   offsetToPoint,
+  previousGraphemeStart,
   pointToOffset,
   type BufferPoint,
   type BufferRange,
@@ -20,6 +21,16 @@ export type VimMotionKind = "charwise" | "linewise";
 export type VimOperatorName = "delete" | "change" | "yank";
 
 export type VimWordMode = "word" | "WORD";
+
+export type VimCharSearchKey = "f" | "t" | "F" | "T";
+
+export type VimMotionDescriptor =
+  | string
+  | {
+      readonly type: "char-search";
+      readonly key: VimCharSearchKey;
+      readonly char: string;
+    };
 
 export interface VimMotionResult {
   readonly start: BufferPoint;
@@ -328,6 +339,74 @@ function adjustOperatorWordEndOfLine(
   return lineEndForInsert(lines, start);
 }
 
+function resolveCharSearchMotion(
+  lines: readonly string[],
+  start: BufferPoint,
+  key: VimCharSearchKey,
+  char: string,
+  count: number,
+): VimMotionResult | undefined {
+  const safeLines = ensureLines(lines);
+  const line = safeLines[start.line] ?? "";
+  const segments = graphemes(line);
+  const normalizedCount = safeCount(count);
+  const forward = key === "f" || key === "t";
+  let matchesSeen = 0;
+
+  const searchSegments = forward ? segments : [...segments].reverse();
+  for (const segment of searchSegments) {
+    if (forward ? segment.index <= start.col : segment.index >= start.col) {
+      continue;
+    }
+    if (segment.segment !== char) continue;
+
+    matchesSeen += 1;
+    if (matchesSeen !== normalizedCount) continue;
+
+    if (key === "f") {
+      return makeMotion(
+        start,
+        { line: start.line, col: segment.index },
+        "charwise",
+        true,
+      );
+    }
+
+    if (key === "t") {
+      return makeMotion(
+        start,
+        {
+          line: start.line,
+          col: previousGraphemeStart(line, segment.index),
+        },
+        "charwise",
+        true,
+      );
+    }
+
+    if (key === "F") {
+      return makeMotion(
+        start,
+        { line: start.line, col: segment.index },
+        "charwise",
+        false,
+      );
+    }
+
+    return makeMotion(
+      start,
+      {
+        line: start.line,
+        col: nextGraphemeEnd(line, segment.index),
+      },
+      "charwise",
+      false,
+    );
+  }
+
+  return undefined;
+}
+
 function moveRightOperatorEndInLine(
   lines: readonly string[],
   point: BufferPoint,
@@ -358,7 +437,7 @@ function makeMotion(
 export function resolveVimMotion(
   lines: readonly string[],
   cursor: BufferPoint,
-  motion: string,
+  motion: VimMotionDescriptor,
   count = 1,
   options: ResolveVimMotionOptions = {},
 ): VimMotionResult | undefined {
@@ -367,6 +446,16 @@ export function resolveVimMotion(
   const normalizedCount = safeCount(count);
   const text = bufferText(safeLines);
   const startOffset = pointToOffset(safeLines, start);
+
+  if (typeof motion !== "string") {
+    return resolveCharSearchMotion(
+      safeLines,
+      start,
+      motion.key,
+      motion.char,
+      normalizedCount,
+    );
+  }
 
   switch (motion) {
     case "h":

@@ -29,6 +29,8 @@ import {
 import {
   resolveVimMotion,
   vimOperatorRangeFromMotion,
+  type VimCharSearchKey,
+  type VimMotionDescriptor,
   type VimOperatorRange,
 } from "../motion/vim-motion.js";
 
@@ -113,6 +115,17 @@ type EditorInternals = {
 
 type OperatorRange = VimOperatorRange;
 
+type PendingCharSearch = {
+  readonly key: VimCharSearchKey;
+  readonly count: number;
+  readonly operator?: ModalOperator;
+};
+
+type LastCharSearch = {
+  readonly key: VimCharSearchKey;
+  readonly char: string;
+};
+
 const MAX_MODAL_COUNT = 10_000;
 
 const OPERATOR_KEYS = {
@@ -127,12 +140,31 @@ const OPERATOR_LABELS = {
   yank: "y",
 } as const satisfies Readonly<Record<ModalOperator, string>>;
 
+function isCharSearchKey(key: string): key is VimCharSearchKey {
+  return key === "f" || key === "t" || key === "F" || key === "T";
+}
+
+function reverseCharSearchKey(key: VimCharSearchKey): VimCharSearchKey {
+  switch (key) {
+    case "f":
+      return "F";
+    case "F":
+      return "f";
+    case "t":
+      return "T";
+    case "T":
+      return "t";
+  }
+}
+
 export class BetterModalMotionEditor extends CustomEditor {
   private mode: ModalEditorMode = "insert";
   private pendingCount = "";
   private pendingOperator: ModalOperator | undefined;
   private operatorCount = 1;
   private pendingCommand: "g" | undefined;
+  private pendingCharSearch: PendingCharSearch | undefined;
+  private lastCharSearch: LastCharSearch | undefined;
   private register: YankRegister | undefined;
   private normalDesiredColumn: number | undefined;
 
@@ -178,6 +210,11 @@ export class BetterModalMotionEditor extends CustomEditor {
       return;
     }
 
+    if (this.pendingCharSearch) {
+      this.handleCharSearchTarget(key, data);
+      return;
+    }
+
     if (this.mode === "operator-pending") {
       this.handleOperatorPendingKey(key, data);
       return;
@@ -209,7 +246,12 @@ export class BetterModalMotionEditor extends CustomEditor {
       return;
     }
 
-    if (this.pendingOperator || this.pendingCount || this.pendingCommand) {
+    if (
+      this.pendingOperator ||
+      this.pendingCount ||
+      this.pendingCommand ||
+      this.pendingCharSearch
+    ) {
       this.clearPendingState();
       this.mode = "normal";
       this.tui.requestRender();
@@ -277,6 +319,16 @@ export class BetterModalMotionEditor extends CustomEditor {
       case "e":
       case "E":
         this.moveNormalByMotion(key, this.takeCount());
+        return;
+      case "f":
+      case "t":
+      case "F":
+      case "T":
+        this.enterCharSearch(key, this.takeCount());
+        return;
+      case ";":
+      case ",":
+        this.repeatCharSearch(key, this.takeCount());
         return;
       case "g":
         this.pendingCommand = "g";
@@ -361,6 +413,16 @@ export class BetterModalMotionEditor extends CustomEditor {
       return;
     }
 
+    if (isCharSearchKey(key)) {
+      this.enterCharSearch(key, count, operator);
+      return;
+    }
+
+    if (key === ";" || key === ",") {
+      this.repeatCharSearch(key, count, operator);
+      return;
+    }
+
     const motionRange = this.getOperatorRange(key, count, operator);
     if (!motionRange) {
       this.clearPendingState();
@@ -406,6 +468,7 @@ export class BetterModalMotionEditor extends CustomEditor {
     this.pendingOperator = undefined;
     this.operatorCount = 1;
     this.pendingCommand = undefined;
+    this.pendingCharSearch = undefined;
   }
 
   private tryAppendCount(key: string): boolean {
@@ -435,11 +498,24 @@ export class BetterModalMotionEditor extends CustomEditor {
     return this.mode === "insert" ? "insert" : "normal";
   }
 
-  private moveNormalByMotion(key: string, count: number): void {
+  private moveNormalByMotion(
+    motionKey: VimMotionDescriptor,
+    count: number,
+  ): void {
+    this.tryMoveNormalByMotion(motionKey, count);
+  }
+
+  private tryMoveNormalByMotion(
+    motionKey: VimMotionDescriptor,
+    count: number,
+  ): boolean {
     const lines = this.getLines();
     const cursor = clampPointToNormalCell(lines, this.getCursor());
     const isVerticalMotion =
-      key === "j" || key === "down" || key === "k" || key === "up";
+      motionKey === "j" ||
+      motionKey === "down" ||
+      motionKey === "k" ||
+      motionKey === "up";
 
     if (isVerticalMotion && this.normalDesiredColumn === undefined) {
       this.normalDesiredColumn = cursor.col;
@@ -448,20 +524,120 @@ export class BetterModalMotionEditor extends CustomEditor {
     const motion = resolveVimMotion(
       lines,
       cursor,
-      key,
+      motionKey,
       count,
       this.normalDesiredColumn === undefined
         ? {}
         : { desiredColumn: this.normalDesiredColumn },
     );
-    if (!motion) return;
+    if (!motion) return false;
 
     if (!isVerticalMotion) this.normalDesiredColumn = undefined;
     this.setNormalCursor(motion.target);
+    return true;
   }
 
   private resetNormalDesiredColumn(): void {
     this.normalDesiredColumn = undefined;
+  }
+
+  private enterCharSearch(
+    key: VimCharSearchKey,
+    count: number,
+    operator?: ModalOperator,
+  ): void {
+    this.pendingCharSearch =
+      operator === undefined ? { key, count } : { key, count, operator };
+    this.tui.requestRender();
+  }
+
+  private handleCharSearchTarget(key: string, data: string): void {
+    const pending = this.pendingCharSearch;
+    if (!pending) return;
+
+    if (!this.isCharSearchTarget(key, data)) {
+      this.clearPendingState();
+      this.mode = "normal";
+      if (!isTextInputData(data)) super.handleInput(data);
+      this.tui.requestRender();
+      return;
+    }
+
+    const motion: VimMotionDescriptor = {
+      type: "char-search",
+      key: pending.key,
+      char: key,
+    };
+
+    this.pendingCharSearch = undefined;
+    if (pending.operator) {
+      this.applyCharSearchOperator(motion, pending, key);
+      return;
+    }
+
+    if (this.tryMoveNormalByMotion(motion, pending.count)) {
+      this.lastCharSearch = { key: pending.key, char: key };
+    }
+    this.tui.requestRender();
+  }
+
+  private isCharSearchTarget(key: string, data: string): boolean {
+    return key.length > 0 && (key === " " || isTextInputData(data));
+  }
+
+  private applyCharSearchOperator(
+    motion: VimMotionDescriptor,
+    pending: PendingCharSearch,
+    char: string,
+  ): void {
+    if (!pending.operator) return;
+
+    const motionRange = this.getOperatorRange(
+      motion,
+      pending.count,
+      pending.operator,
+    );
+    if (motionRange) {
+      this.lastCharSearch = { key: pending.key, char };
+      this.applyOperatorRange(pending.operator, motionRange);
+      return;
+    }
+
+    this.clearPendingState();
+    this.mode = "normal";
+    this.tui.requestRender();
+  }
+
+  private repeatCharSearch(
+    repeatKey: ";" | ",",
+    count: number,
+    operator?: ModalOperator,
+  ): void {
+    if (!this.lastCharSearch) return;
+
+    const key =
+      repeatKey === ";"
+        ? this.lastCharSearch.key
+        : reverseCharSearchKey(this.lastCharSearch.key);
+    const motion: VimMotionDescriptor = {
+      type: "char-search",
+      key,
+      char: this.lastCharSearch.char,
+    };
+
+    if (operator) {
+      const motionRange = this.getOperatorRange(motion, count, operator);
+      if (motionRange) {
+        this.applyOperatorRange(operator, motionRange);
+        return;
+      }
+      this.clearPendingState();
+      this.mode = "normal";
+      this.tui.requestRender();
+      return;
+    }
+
+    this.tryMoveNormalByMotion(motion, count);
   }
 
   private setCursor(point: BufferPoint): void {
@@ -740,12 +916,12 @@ export class BetterModalMotionEditor extends CustomEditor {
   }
 
   private getOperatorRange(
-    key: string,
+    motionKey: VimMotionDescriptor,
     count: number,
     operator: ModalOperator,
   ): OperatorRange | undefined {
     const lines = this.getLines();
-    const motion = resolveVimMotion(lines, this.getCursor(), key, count, {
+    const motion = resolveVimMotion(lines, this.getCursor(), motionKey, count, {
       operator,
     });
     return motion ? vimOperatorRangeFromMotion(lines, motion) : undefined;
