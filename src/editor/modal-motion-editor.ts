@@ -17,23 +17,20 @@ import {
   getRangeText,
   lineEndForInsert,
   lineFirstNonBlank,
-  lineStart,
-  moveLeftInLine,
-  moveRightInNormalLine,
-  moveToWordEnd,
   nextGraphemeEnd,
   normalizeRange,
-  nextWordStartOffset,
-  offsetToPoint,
   pointToOffset,
   previousGraphemeStart,
-  previousWordStartOffset,
   replaceRange,
-  wordEndOffset,
   yankLineRange,
   type BufferPoint,
   type BufferRange,
 } from "../motion/text-buffer.js";
+import {
+  resolveVimMotion,
+  vimOperatorRangeFromMotion,
+  type VimOperatorRange,
+} from "../motion/vim-motion.js";
 
 export type ModalEditorMode = "normal" | "insert" | "operator-pending";
 
@@ -114,10 +111,9 @@ type EditorInternals = {
   setCursorCol?: (col: number) => void;
 };
 
-interface OperatorRange {
-  readonly range: BufferRange;
-  readonly linewise: boolean;
-}
+type OperatorRange = VimOperatorRange;
+
+const MAX_MODAL_COUNT = 10_000;
 
 const OPERATOR_KEYS = {
   d: "delete",
@@ -138,6 +134,7 @@ export class BetterModalMotionEditor extends CustomEditor {
   private operatorCount = 1;
   private pendingCommand: "g" | undefined;
   private register: YankRegister | undefined;
+  private normalDesiredColumn: number | undefined;
 
   constructor(
     tui: CustomEditorConstructorArgs[0],
@@ -254,49 +251,32 @@ export class BetterModalMotionEditor extends CustomEditor {
         return;
       case "h":
       case "left":
-        this.repeatEditorInput("\x1b[D", this.takeCount());
-        return;
       case "l":
       case "right":
-        this.repeatEditorInput("\x1b[C", this.takeCount());
-        return;
       case "j":
       case "down":
-        this.repeatEditorInput("\x1b[B", this.takeCount());
-        return;
       case "k":
       case "up":
-        this.repeatEditorInput("\x1b[A", this.takeCount());
+        this.moveNormalByMotion(key, this.takeCount());
         return;
       case "0":
       case "home":
-        this.pendingCount = "";
-        super.handleInput("\x01");
+        this.moveNormalByMotion(key, this.takeCount());
         return;
       case "^":
-        this.pendingCount = "";
-        this.setNormalCursor(
-          lineFirstNonBlank(this.getLines(), this.getCursor()),
-        );
+        this.moveNormalByMotion(key, this.takeCount());
         return;
       case "$":
       case "end":
-        this.pendingCount = "";
-        super.handleInput("\x05");
-        this.setNormalCursor(this.getCursor());
+        this.moveNormalByMotion(key, this.takeCount());
         return;
       case "w":
-        this.repeatEditorInput("\x1bf", this.takeCount());
-        this.setNormalCursor(this.getCursor());
-        return;
+      case "W":
       case "b":
-        this.repeatEditorInput("\x1bb", this.takeCount());
-        this.setNormalCursor(this.getCursor());
-        return;
+      case "B":
       case "e":
-        this.setNormalCursor(
-          moveToWordEnd(this.getLines(), this.getCursor(), this.takeCount()),
-        );
+      case "E":
+        this.moveNormalByMotion(key, this.takeCount());
         return;
       case "g":
         this.pendingCommand = "g";
@@ -370,7 +350,7 @@ export class BetterModalMotionEditor extends CustomEditor {
       return;
     }
 
-    const motionRange = this.getOperatorRange(key, count);
+    const motionRange = this.getOperatorRange(key, count, operator);
     if (!motionRange) {
       this.clearPendingState();
       this.mode = "normal";
@@ -385,6 +365,7 @@ export class BetterModalMotionEditor extends CustomEditor {
   private enterNormalModeFromInsert(): void {
     this.mode = "normal";
     this.clearPendingState();
+    this.resetNormalDesiredColumn();
     const cursor = this.getCursor();
     const line = this.getLines()[cursor.line] ?? "";
     if (cursor.col > 0 && line.length > 0) {
@@ -397,6 +378,7 @@ export class BetterModalMotionEditor extends CustomEditor {
   private enterInsertMode(): void {
     this.mode = "insert";
     this.clearPendingState();
+    this.resetNormalDesiredColumn();
     this.tui.requestRender();
   }
 
@@ -418,7 +400,13 @@ export class BetterModalMotionEditor extends CustomEditor {
   private tryAppendCount(key: string): boolean {
     if (!/^\d$/u.test(key)) return false;
     if (key === "0" && this.pendingCount.length === 0) return false;
-    this.pendingCount += key;
+
+    const nextCount = Number.parseInt(`${this.pendingCount}${key}`, 10);
+    this.pendingCount = String(
+      Number.isFinite(nextCount)
+        ? Math.min(nextCount, MAX_MODAL_COUNT)
+        : MAX_MODAL_COUNT,
+    );
     this.tui.requestRender();
     return true;
   }
@@ -428,17 +416,41 @@ export class BetterModalMotionEditor extends CustomEditor {
       ? Number.parseInt(this.pendingCount, 10)
       : 1;
     this.pendingCount = "";
-    return Number.isFinite(count) && count > 0 ? count : 1;
+    if (!Number.isFinite(count) || count <= 0) return 1;
+    return Math.min(count, MAX_MODAL_COUNT);
   }
 
   private getDisplayMode(): Exclude<ModalEditorMode, "operator-pending"> {
     return this.mode === "insert" ? "insert" : "normal";
   }
 
-  private repeatEditorInput(data: string, count: number): void {
-    for (let index = 0; index < Math.max(1, count); index += 1) {
-      super.handleInput(data);
+  private moveNormalByMotion(key: string, count: number): void {
+    const lines = this.getLines();
+    const cursor = clampPointToNormalCell(lines, this.getCursor());
+    const isVerticalMotion =
+      key === "j" || key === "down" || key === "k" || key === "up";
+
+    if (isVerticalMotion && this.normalDesiredColumn === undefined) {
+      this.normalDesiredColumn = cursor.col;
     }
+
+    const motion = resolveVimMotion(
+      lines,
+      cursor,
+      key,
+      count,
+      this.normalDesiredColumn === undefined
+        ? {}
+        : { desiredColumn: this.normalDesiredColumn },
+    );
+    if (!motion) return;
+
+    if (!isVerticalMotion) this.normalDesiredColumn = undefined;
+    this.setNormalCursor(motion.target);
+  }
+
+  private resetNormalDesiredColumn(): void {
+    this.normalDesiredColumn = undefined;
   }
 
   private setCursor(point: BufferPoint): void {
@@ -461,6 +473,7 @@ export class BetterModalMotionEditor extends CustomEditor {
   }
 
   private setTextAndCursor(lines: readonly string[], point: BufferPoint): void {
+    this.resetNormalDesiredColumn();
     const nextLines = lines.length > 0 ? [...lines] : [""];
     this.setText(bufferText(nextLines));
     this.setCursor(point);
@@ -502,6 +515,7 @@ export class BetterModalMotionEditor extends CustomEditor {
   }
 
   private goToLine(lineNumber: number | undefined): void {
+    this.resetNormalDesiredColumn();
     const lines = this.getLines();
     const targetLine =
       lineNumber === undefined
@@ -578,7 +592,12 @@ export class BetterModalMotionEditor extends CustomEditor {
     const lines = this.getLines();
     const normalizedRange = normalizeRange(range);
     const text = getRangeText(lines, normalizedRange);
-    if (!text) return;
+    if (!text) {
+      this.mode = "normal";
+      this.clearPendingState();
+      this.tui.requestRender();
+      return;
+    }
     this.register = { text, linewise: false };
     const result = replaceRange(lines, normalizedRange, "");
     this.mode = "normal";
@@ -593,6 +612,12 @@ export class BetterModalMotionEditor extends CustomEditor {
     const lines = this.getLines();
     const normalizedRange = normalizeRange(range);
     const text = getRangeText(lines, normalizedRange);
+    if (!text) {
+      this.mode = "normal";
+      this.clearPendingState();
+      this.tui.requestRender();
+      return;
+    }
     this.register = { text, linewise: false };
     const result = replaceRange(lines, normalizedRange, "");
     this.mode = "insert";
@@ -673,117 +698,13 @@ export class BetterModalMotionEditor extends CustomEditor {
   private getOperatorRange(
     key: string,
     count: number,
+    operator: ModalOperator,
   ): OperatorRange | undefined {
     const lines = this.getLines();
-    const cursor = clampPointToNormalCell(lines, this.getCursor());
-    const text = bufferText(lines);
-    const startOffset = pointToOffset(lines, cursor);
-
-    switch (key) {
-      case "w":
-        return {
-          range: {
-            start: cursor,
-            end: offsetToPoint(
-              lines,
-              nextWordStartOffset(text, startOffset, count),
-            ),
-          },
-          linewise: false,
-        };
-      case "b":
-        return {
-          range: {
-            start: cursor,
-            end: offsetToPoint(
-              lines,
-              previousWordStartOffset(text, startOffset, count),
-            ),
-          },
-          linewise: false,
-        };
-      case "e": {
-        const endPoint = offsetToPoint(
-          lines,
-          wordEndOffset(text, startOffset, count),
-        );
-        const endLine = lines[endPoint.line] ?? "";
-        return {
-          range: {
-            start: cursor,
-            end: {
-              line: endPoint.line,
-              col: nextGraphemeEnd(endLine, endPoint.col),
-            },
-          },
-          linewise: false,
-        };
-      }
-      case "0":
-      case "home":
-        return {
-          range: { start: cursor, end: lineStart(lines, cursor) },
-          linewise: false,
-        };
-      case "^":
-        return {
-          range: { start: cursor, end: lineFirstNonBlank(lines, cursor) },
-          linewise: false,
-        };
-      case "$":
-      case "end":
-        return {
-          range: { start: cursor, end: lineEndForInsert(lines, cursor) },
-          linewise: false,
-        };
-      case "h":
-      case "left":
-        return {
-          range: { start: cursor, end: moveLeftInLine(lines, cursor, count) },
-          linewise: false,
-        };
-      case "l":
-      case "right": {
-        const target = moveRightInNormalLine(lines, cursor, count);
-        const targetLine = lines[target.line] ?? "";
-        return {
-          range: {
-            start: cursor,
-            end: {
-              line: target.line,
-              col: nextGraphemeEnd(targetLine, target.col),
-            },
-          },
-          linewise: false,
-        };
-      }
-      case "j":
-      case "down":
-        return this.getLinewiseMotionRange(count);
-      case "k":
-      case "up":
-        return this.getLinewiseMotionRange(-count);
-      default:
-        return undefined;
-    }
-  }
-
-  private getLinewiseMotionRange(delta: number): OperatorRange {
-    const lines = this.getLines();
-    const cursor = clampPoint(lines, this.getCursor());
-    const targetLine = Math.max(
-      0,
-      Math.min(lines.length - 1, cursor.line + delta),
-    );
-    const startLine = Math.min(cursor.line, targetLine);
-    const endLine = Math.max(cursor.line, targetLine);
-    return {
-      range: {
-        start: { line: startLine, col: 0 },
-        end: { line: endLine, col: 0 },
-      },
-      linewise: true,
-    };
+    const motion = resolveVimMotion(lines, this.getCursor(), key, count, {
+      operator,
+    });
+    return motion ? vimOperatorRangeFromMotion(lines, motion) : undefined;
   }
 
   private pasteRegister(position: "before" | "after", count: number): void {

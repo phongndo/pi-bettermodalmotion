@@ -61,6 +61,17 @@ function createEditor(text = ""): BetterModalMotionEditor {
   return editor;
 }
 
+function sendKeys(
+  editor: BetterModalMotionEditor,
+  keys: readonly string[],
+): void {
+  for (const key of keys) editor.handleInput(key);
+}
+
+function enterNormalAtStart(editor: BetterModalMotionEditor): void {
+  sendKeys(editor, ["\x1b", "g", "g", "0"]);
+}
+
 describe("modal motion editor helpers", () => {
   it("normalizes raw terminal input into modal keys", () => {
     expect(getModalKey("h")).toBe("h");
@@ -166,5 +177,110 @@ describe("BetterModalMotionEditor", () => {
     editor.handleInput("p");
 
     expect(editor.getText()).toBe("one\none\ntwo");
+  });
+
+  it("keeps normal-mode horizontal motion inside the current line", () => {
+    const editor = createEditor("a\nbc");
+    sendKeys(editor, ["\x1b", "0", "h"]);
+
+    expect(editor.getCursor()).toEqual({ line: 1, col: 0 });
+
+    sendKeys(editor, ["l", "l"]);
+
+    expect(editor.getCursor()).toEqual({ line: 1, col: 1 });
+  });
+
+  it("uses Vim-exclusive ranges for right and left character operators", () => {
+    const deleteRight = createEditor("abc");
+    enterNormalAtStart(deleteRight);
+    sendKeys(deleteRight, ["d", "l"]);
+
+    expect(deleteRight.getText()).toBe("bc");
+    expect(deleteRight.getRegister()).toEqual({ text: "a", linewise: false });
+
+    const deleteTwoRight = createEditor("abc");
+    enterNormalAtStart(deleteTwoRight);
+    sendKeys(deleteTwoRight, ["d", "2", "l"]);
+
+    expect(deleteTwoRight.getText()).toBe("c");
+    expect(deleteTwoRight.getRegister()).toEqual({
+      text: "ab",
+      linewise: false,
+    });
+
+    const deleteLeft = createEditor("abc");
+    enterNormalAtStart(deleteLeft);
+    sendKeys(deleteLeft, ["l", "d", "h"]);
+
+    expect(deleteLeft.getText()).toBe("bc");
+    expect(deleteLeft.getRegister()).toEqual({ text: "a", linewise: false });
+  });
+
+  it("uses Vim-inclusive ranges for end-of-line operators", () => {
+    const editor = createEditor("abc\ndef\nghi");
+    enterNormalAtStart(editor);
+    sendKeys(editor, ["l", "d", "2", "$"]);
+
+    expect(editor.getText()).toBe("a\nghi");
+    expect(editor.getRegister()).toEqual({
+      text: "bc\ndef",
+      linewise: false,
+    });
+  });
+
+  it("uses Vim word classes instead of whitespace-only WORD motions", () => {
+    const normalMotion = createEditor("a.b c");
+    enterNormalAtStart(normalMotion);
+    normalMotion.handleInput("w");
+
+    expect(normalMotion.getCursor()).toEqual({ line: 0, col: 1 });
+
+    const deleteWord = createEditor("a.b c");
+    enterNormalAtStart(deleteWord);
+    sendKeys(deleteWord, ["d", "w"]);
+
+    expect(deleteWord.getText()).toBe(".b c");
+    expect(deleteWord.getRegister()).toEqual({ text: "a", linewise: false });
+
+    const deletePunctuation = createEditor("a.b c");
+    enterNormalAtStart(deletePunctuation);
+    sendKeys(deletePunctuation, ["l", "d", "w"]);
+
+    expect(deletePunctuation.getText()).toBe("ab c");
+    expect(deletePunctuation.getRegister()).toEqual({
+      text: ".",
+      linewise: false,
+    });
+  });
+
+  it("handles Vim's cw and dw end-of-line word-motion exceptions", () => {
+    const changeWord = createEditor("abc def");
+    enterNormalAtStart(changeWord);
+    sendKeys(changeWord, ["c", "w", "X", "\x1b"]);
+
+    expect(changeWord.getText()).toBe("X def");
+    expect(changeWord.getRegister()).toEqual({ text: "abc", linewise: false });
+
+    const deleteWordAtLineEnd = createEditor("abc\ndef");
+    enterNormalAtStart(deleteWordAtLineEnd);
+    sendKeys(deleteWordAtLineEnd, ["d", "w"]);
+
+    expect(deleteWordAtLineEnd.getText()).toBe("\ndef");
+    expect(deleteWordAtLineEnd.getRegister()).toEqual({
+      text: "abc",
+      linewise: false,
+    });
+  });
+
+  it("multiplies operator and motion counts for word motions", () => {
+    const editor = createEditor("abc\ndef ghi");
+    enterNormalAtStart(editor);
+    sendKeys(editor, ["d", "2", "w"]);
+
+    expect(editor.getText()).toBe("ghi");
+    expect(editor.getRegister()).toEqual({
+      text: "abc\ndef ",
+      linewise: false,
+    });
   });
 });
