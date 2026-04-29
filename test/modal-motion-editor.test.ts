@@ -261,6 +261,16 @@ describe("BetterModalMotionEditor", () => {
     expect(changeWord.getText()).toBe("X def");
     expect(changeWord.getRegister()).toEqual({ text: "abc", linewise: false });
 
+    const changeWordFromEnd = createEditor("abc def");
+    enterNormalAtStart(changeWordFromEnd);
+    sendKeys(changeWordFromEnd, ["l", "l", "c", "w", "X", "\x1b"]);
+
+    expect(changeWordFromEnd.getText()).toBe("abX def");
+    expect(changeWordFromEnd.getRegister()).toEqual({
+      text: "c",
+      linewise: false,
+    });
+
     const deleteWordAtLineEnd = createEditor("abc\ndef");
     enterNormalAtStart(deleteWordAtLineEnd);
     sendKeys(deleteWordAtLineEnd, ["d", "w"]);

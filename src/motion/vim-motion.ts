@@ -198,6 +198,33 @@ function wordEndOffset(
   return segments[Math.min(index, segments.length - 1)]?.index ?? text.length;
 }
 
+function changeWordEndOffset(
+  text: string,
+  offset: number,
+  count: number,
+  mode: VimWordMode,
+): number {
+  const segments = graphemes(text);
+  if (segments.length === 0) return 0;
+
+  let index = segmentAtOrAfter(segments, Math.max(0, offset));
+  const normalizedCount = safeCount(count);
+  for (let step = 0; step < normalizedCount; step += 1) {
+    while (wordClass(segments[index]?.segment, mode) === "space") {
+      index += 1;
+    }
+    if (index >= segments.length) return text.length;
+
+    while (sameWordRun(segments[index], segments[index + 1], mode)) {
+      index += 1;
+    }
+
+    if (step < normalizedCount - 1) index += 1;
+  }
+
+  return segments[Math.min(index, segments.length - 1)]?.index ?? text.length;
+}
+
 function isNonBlankAt(lines: readonly string[], point: BufferPoint): boolean {
   const line = ensureLines(lines)[point.line] ?? "";
   const segment = graphemes(line.slice(point.col))[0]?.segment;
@@ -309,12 +336,14 @@ export function resolveVimMotion(
     }
     case "w": {
       if (options.operator === "change" && isNonBlankAt(safeLines, start)) {
-        return resolveVimMotion(
-          safeLines,
+        return makeMotion(
           start,
-          "e",
-          normalizedCount,
-          options,
+          offsetToPoint(
+            safeLines,
+            changeWordEndOffset(text, startOffset, normalizedCount, "word"),
+          ),
+          "charwise",
+          true,
         );
       }
 
@@ -334,12 +363,14 @@ export function resolveVimMotion(
     }
     case "W": {
       if (options.operator === "change" && isNonBlankAt(safeLines, start)) {
-        return resolveVimMotion(
-          safeLines,
+        return makeMotion(
           start,
-          "E",
-          normalizedCount,
-          options,
+          offsetToPoint(
+            safeLines,
+            changeWordEndOffset(text, startOffset, normalizedCount, "WORD"),
+          ),
+          "charwise",
+          true,
         );
       }
 
