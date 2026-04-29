@@ -139,6 +139,15 @@ describe("BetterModalMotionEditor", () => {
     expect(editor.getCursor()).toEqual({ line: 0, col: 3 });
   });
 
+  it("enters normal mode from insert mode without splitting graphemes", () => {
+    const editor = createEditor("a😀");
+
+    editor.handleInput("\x1b");
+
+    expect(editor.getMode()).toBe("normal");
+    expect(editor.getCursor()).toEqual({ line: 0, col: 1 });
+  });
+
   it("supports word deletion with dw", () => {
     const editor = createEditor("hello world");
     editor.handleInput("\x1b");
@@ -500,6 +509,59 @@ describe("BetterModalMotionEditor", () => {
     editor.handleInput(";");
 
     expect(editor.getCursor()).toEqual({ line: 0, col: 10 });
+  });
+
+  it("cancels operator-pending character-search repeats without a previous search", () => {
+    const semicolon = createEditor("abc def");
+    enterNormalAtStart(semicolon);
+    sendKeys(semicolon, ["d", ";"]);
+
+    expect(semicolon.getMode()).toBe("normal");
+    expect(semicolon.getText()).toBe("abc def");
+    expect(semicolon.getRegister()).toBeUndefined();
+
+    semicolon.handleInput("w");
+
+    expect(semicolon.getText()).toBe("abc def");
+    expect(semicolon.getCursor()).toEqual({ line: 0, col: 4 });
+
+    const comma = createEditor("abc def");
+    enterNormalAtStart(comma);
+    sendKeys(comma, ["d", ",", "w"]);
+
+    expect(comma.getText()).toBe("abc def");
+    expect(comma.getCursor()).toEqual({ line: 0, col: 4 });
+    expect(comma.getRegister()).toBeUndefined();
+  });
+
+  it("cancels a pending character search when the target input is not one character", () => {
+    const editor = createEditor("abc w def");
+    enterNormalAtStart(editor);
+    sendKeys(editor, ["d", "f", "\x1b[200~paste\x1b[201~"]);
+
+    expect(editor.getMode()).toBe("normal");
+    expect(editor.getText()).toBe("abc w def");
+    expect(editor.getRegister()).toBeUndefined();
+
+    editor.handleInput("w");
+
+    expect(editor.getText()).toBe("abc w def");
+    expect(editor.getCursor()).toEqual({ line: 0, col: 4 });
+  });
+
+  it("supports single-grapheme character-search targets", () => {
+    const move = createEditor("a😀b😀c");
+    enterNormalAtStart(move);
+    sendKeys(move, ["f", "😀", ";"]);
+
+    expect(move.getCursor()).toEqual({ line: 0, col: 4 });
+
+    const remove = createEditor("a😀b");
+    enterNormalAtStart(remove);
+    sendKeys(remove, ["d", "f", "😀"]);
+
+    expect(remove.getText()).toBe("b");
+    expect(remove.getRegister()).toEqual({ text: "a😀", linewise: false });
   });
 
   it("leaves cursor and text unchanged when character search has no match", () => {

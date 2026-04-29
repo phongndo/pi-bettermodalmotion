@@ -75,6 +75,32 @@ export function getLegacyEscapeSuffixKey(data: string): string | undefined {
   return suffix;
 }
 
+const charSearchTargetSegmenter = new Intl.Segmenter(undefined, {
+  granularity: "grapheme",
+});
+
+function singlePrintableGrapheme(text: string): string | undefined {
+  if (text.includes("\x1b")) return undefined;
+
+  const segments = [...charSearchTargetSegmenter.segment(text)];
+  if (segments.length !== 1) return undefined;
+
+  const segment = segments[0]?.segment;
+  if (!segment || /\p{Cc}/u.test(segment)) return undefined;
+  return segment;
+}
+
+function getCharSearchTarget(data: string): string | undefined {
+  const decoded = decodeKittyPrintable(data);
+  if (decoded !== undefined) return singlePrintableGrapheme(decoded);
+
+  const parsed = parseKey(data);
+  if (parsed === "space") return " ";
+  if (parsed && parsed.length === 1) return singlePrintableGrapheme(parsed);
+
+  return singlePrintableGrapheme(data);
+}
+
 export function buildModeBorderLine(
   width: number,
   mode: ModalEditorMode,
@@ -203,15 +229,15 @@ export class BetterModalMotionEditor extends CustomEditor {
       return;
     }
 
+    if (this.pendingCharSearch) {
+      this.handleCharSearchTarget(getCharSearchTarget(data), data);
+      return;
+    }
+
     const key = getModalKey(data);
     if (!key) {
       if (isTextInputData(data)) return;
       super.handleInput(data);
-      return;
-    }
-
-    if (this.pendingCharSearch) {
-      this.handleCharSearchTarget(key, data);
       return;
     }
 
@@ -441,11 +467,15 @@ export class BetterModalMotionEditor extends CustomEditor {
     this.resetNormalDesiredColumn();
     const cursor = this.getCursor();
     const line = this.getLines()[cursor.line] ?? "";
-    if (cursor.col > 0 && line.length > 0) {
-      super.handleInput("\x1b[D");
-      return;
-    }
-    this.setNormalCursor(cursor);
+    this.setNormalCursor(
+      cursor.col > 0 && line.length > 0
+        ? {
+            line: cursor.line,
+            col: previousGraphemeStart(line, cursor.col),
+          }
+        : cursor,
+    );
+    this.tui.requestRender(true);
   }
 
   private enterInsertMode(): void {
@@ -551,11 +581,14 @@ export class BetterModalMotionEditor extends CustomEditor {
     this.tui.requestRender();
   }
 
-  private handleCharSearchTarget(key: string, data: string): void {
+  private handleCharSearchTarget(
+    key: string | undefined,
+    data: string,
+  ): void {
     const pending = this.pendingCharSearch;
     if (!pending) return;
 
-    if (!this.isCharSearchTarget(key, data)) {
+    if (key === undefined) {
       this.clearPendingState();
       this.mode = "normal";
       if (!isTextInputData(data)) super.handleInput(data);
@@ -579,10 +612,6 @@ export class BetterModalMotionEditor extends CustomEditor {
       this.lastCharSearch = { key: pending.key, char: key };
     }
     this.tui.requestRender();
-  }
-
-  private isCharSearchTarget(key: string, data: string): boolean {
-    return key.length > 0 && (key === " " || isTextInputData(data));
   }
 
   private applyCharSearchOperator(
@@ -613,7 +642,14 @@ export class BetterModalMotionEditor extends CustomEditor {
     count: number,
     operator?: ModalOperator,
   ): void {
-    if (!this.lastCharSearch) return;
+    if (!this.lastCharSearch) {
+      if (operator) {
+        this.clearPendingState();
+        this.mode = "normal";
+        this.tui.requestRender();
+      }
+      return;
+    }
 
     const key =
       repeatKey === ";"
