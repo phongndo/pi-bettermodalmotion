@@ -50,7 +50,7 @@ jobs:
       - name: Upload tarball artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pi-bettermodalmotion-package
+          name: pi-modal-motion-package
           path: "*.tgz"
 
       - name: Create GitHub release

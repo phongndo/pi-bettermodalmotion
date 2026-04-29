@@ -1,4 +1,4 @@
-# Better Modal Motion plan
+# pi-modal-motion plan
 
 ## Current state
 

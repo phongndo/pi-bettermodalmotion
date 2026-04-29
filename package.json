@@ -1,5 +1,5 @@
 {
-  "name": "pi-bettermodalmotion",
+  "name": "pi-modal-motion",
   "version": "0.1.0",
   "private": false,
   "description": "Vim-inspired modal editing and motion experiments for pi's input editor.",
@@ -60,6 +60,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phongndo/pi-bettermodalmotion.git"
+    "url": "git+https://github.com/phongndo/pi-modal-motion.git"
   }
 }

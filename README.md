@@ -1,4 +1,4 @@
-# pi-bettermodalmotion
+# pi-modal-motion
 
 A [pi](https://pi.dev) extension package for experimenting with Vim-inspired modal editing and richer motion ergonomics in pi's input editor.
 
@@ -9,19 +9,19 @@ This scaffold starts from pi's `modal-editor.ts` example and turns it into a pac
 Install from npm once published:
 
 ```bash
-pi install npm:pi-bettermodalmotion
+pi install npm:pi-modal-motion
 ```
 
 Install directly from GitHub:
 
 ```bash
-pi install git:github.com/phongndo/pi-bettermodalmotion
+pi install git:github.com/phongndo/pi-modal-motion
 ```
 
 Install a pinned GitHub release/tag:
 
 ```bash
-pi install git:github.com/phongndo/pi-bettermodalmotion@v0.1.0
+pi install git:github.com/phongndo/pi-modal-motion@v0.1.0
 ```
 
 Try without installing from this checkout:
@@ -30,7 +30,7 @@ Try without installing from this checkout:
 pi -e .
 ```
 
-When loaded in interactive pi, the extension replaces the prompt editor with the Better Modal Motion editor.
+When loaded in interactive pi, the extension replaces the prompt editor with the Modal Motion editor.
 
 ## Modal input behavior
 
@@ -65,7 +65,7 @@ When loaded in interactive pi, the extension replaces the prompt editor with the
 ├── docs/                # planning notes and future docs
 ├── src/
 │   ├── config/          # placeholder for future configuration modules
-│   ├── editor/          # Better Modal Motion editor implementation
+│   ├── editor/          # Modal Motion editor implementation
 │   ├── motion/          # prompt-buffer motion/operator helpers
 │   ├── runtime/         # placeholder for future extension orchestration
 │   └── index.ts         # pi extension entrypoint
