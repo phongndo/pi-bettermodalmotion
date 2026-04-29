@@ -343,7 +343,7 @@ export class BetterModalMotionEditor extends CustomEditor {
 
     const operator = this.pendingOperator;
     const motionCount = this.takeCount();
-    const count = this.operatorCount * motionCount;
+    const count = Math.min(MAX_MODAL_COUNT, this.operatorCount * motionCount);
 
     if (key === OPERATOR_LABELS[operator]) {
       this.applyLinewiseOperator(operator, count);
