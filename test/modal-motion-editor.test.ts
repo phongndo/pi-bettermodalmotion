@@ -323,4 +323,17 @@ describe("BetterModalMotionEditor", () => {
       linewise: false,
     });
   });
+
+  it("converts backward exclusive motions from column zero to linewise ranges", () => {
+    const editor = createEditor("abc\ndef");
+    enterNormalAtStart(editor);
+    sendKeys(editor, ["j", "d", "b"]);
+
+    expect(editor.getText()).toBe("def");
+    expect(editor.getRegister()).toEqual({ text: "abc\n", linewise: true });
+
+    editor.handleInput("p");
+
+    expect(editor.getText()).toBe("def\nabc");
+  });
 });

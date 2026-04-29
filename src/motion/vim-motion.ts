@@ -496,6 +496,21 @@ export function vimOperatorRangeFromMotion(
         };
   }
 
+  if (
+    !movesForward &&
+    target.line < start.line &&
+    target.col === 0 &&
+    start.col <= firstNonBlankCol(safeLines[start.line] ?? "")
+  ) {
+    return {
+      range: {
+        start: { line: target.line, col: 0 },
+        end: { line: start.line - 1, col: 0 },
+      },
+      linewise: true,
+    };
+  }
+
   return movesForward
     ? { range: { start, end: target }, linewise: false }
     : { range: { start: target, end: start }, linewise: false };
