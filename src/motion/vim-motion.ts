@@ -260,6 +260,53 @@ function changeWordEndOffset(
   return segments[Math.min(index, segments.length - 1)]?.index ?? text.length;
 }
 
+function moveBeforeRun(
+  segments: readonly WordSegment[],
+  index: number,
+  mode: VimWordMode,
+): number {
+  if (wordClass(segments[index], mode) === "empty") return index - 1;
+  let cursor = index;
+  while (sameWordRun(segments[cursor - 1], segments[cursor], mode)) {
+    cursor -= 1;
+  }
+  return cursor - 1;
+}
+
+function previousWordEndOffset(
+  text: string,
+  offset: number,
+  count: number,
+  mode: VimWordMode,
+): number {
+  const segments = wordSegments(text);
+  if (segments.length === 0) return 0;
+
+  const currentIndex = segmentAtOrAfter(segments, Math.max(0, offset));
+  let index = segmentBefore(segments, Math.max(0, offset));
+
+  if (sameWordRun(segments[index], segments[currentIndex], mode)) {
+    index = moveBeforeRun(segments, index, mode);
+  }
+
+  for (let step = 0; step < safeCount(count); step += 1) {
+    while (index >= 0 && wordClass(segments[index], mode) === "space") {
+      index -= 1;
+    }
+    if (index < 0) return 0;
+
+    while (sameWordRun(segments[index], segments[index + 1], mode)) {
+      index += 1;
+    }
+
+    if (step < safeCount(count) - 1) {
+      index = moveBeforeRun(segments, index, mode);
+    }
+  }
+
+  return segments[Math.max(0, index)]?.index ?? 0;
+}
+
 function isNonBlankAt(lines: readonly string[], point: BufferPoint): boolean {
   const line = ensureLines(lines)[point.line] ?? "";
   const segment = graphemes(line.slice(point.col))[0]?.segment;
@@ -479,6 +526,26 @@ export function resolveVimMotion(
         offsetToPoint(
           safeLines,
           wordEndOffset(text, startOffset, normalizedCount, "WORD"),
+        ),
+        "charwise",
+        true,
+      );
+    case "ge":
+      return makeMotion(
+        start,
+        offsetToPoint(
+          safeLines,
+          previousWordEndOffset(text, startOffset, normalizedCount, "word"),
+        ),
+        "charwise",
+        true,
+      );
+    case "gE":
+      return makeMotion(
+        start,
+        offsetToPoint(
+          safeLines,
+          previousWordEndOffset(text, startOffset, normalizedCount, "WORD"),
         ),
         "charwise",
         true,

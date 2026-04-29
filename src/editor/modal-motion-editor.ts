@@ -339,6 +339,11 @@ export class BetterModalMotionEditor extends CustomEditor {
       return;
     }
 
+    if (this.pendingCommand === "g") {
+      this.handleOperatorGCommand(key, data);
+      return;
+    }
+
     if (this.tryAppendCount(key)) return;
 
     const operator = this.pendingOperator;
@@ -347,6 +352,12 @@ export class BetterModalMotionEditor extends CustomEditor {
 
     if (key === OPERATOR_LABELS[operator]) {
       this.applyLinewiseOperator(operator, count);
+      return;
+    }
+
+    if (key === "g") {
+      this.pendingCommand = "g";
+      this.tui.requestRender();
       return;
     }
 
@@ -535,8 +546,41 @@ export class BetterModalMotionEditor extends CustomEditor {
       return;
     }
 
+    if (key === "e" || key === "E") {
+      const count = this.takeCount();
+      this.pendingCommand = undefined;
+      this.moveNormalByMotion(`g${key}`, count);
+      return;
+    }
+
     this.pendingCommand = undefined;
     this.pendingCount = "";
+    this.tui.requestRender();
+  }
+
+  private handleOperatorGCommand(key: string, data: string): void {
+    const operator = this.pendingOperator;
+    if (!operator) {
+      this.pendingCommand = undefined;
+      this.mode = "normal";
+      this.handleNormalKey(key, data);
+      return;
+    }
+
+    if (key === "e" || key === "E") {
+      const motionCount = this.takeCount();
+      const count = Math.min(MAX_MODAL_COUNT, this.operatorCount * motionCount);
+      const motionRange = this.getOperatorRange(`g${key}`, count, operator);
+      this.pendingCommand = undefined;
+      if (motionRange) {
+        this.applyOperatorRange(operator, motionRange);
+        return;
+      }
+    }
+
+    this.clearPendingState();
+    this.mode = "normal";
+    if (!isTextInputData(data)) super.handleInput(data);
     this.tui.requestRender();
   }
 

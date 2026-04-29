@@ -360,4 +360,55 @@ describe("BetterModalMotionEditor", () => {
       linewise: true,
     });
   });
+
+  it("supports Vim ge and gE previous-word-end motions", () => {
+    const previousWordEnd = createEditor("foo bar baz");
+    enterNormalAtStart(previousWordEnd);
+    sendKeys(previousWordEnd, ["w", "w", "g", "e"]);
+
+    expect(previousWordEnd.getCursor()).toEqual({ line: 0, col: 6 });
+
+    const countedPreviousWordEnd = createEditor("foo bar baz");
+    enterNormalAtStart(countedPreviousWordEnd);
+    sendKeys(countedPreviousWordEnd, ["w", "w", "2", "g", "e"]);
+
+    expect(countedPreviousWordEnd.getCursor()).toEqual({ line: 0, col: 2 });
+
+    const previousWordEndInPunctuation = createEditor("foo.bar baz");
+    enterNormalAtStart(previousWordEndInPunctuation);
+    sendKeys(previousWordEndInPunctuation, ["w", "g", "e"]);
+
+    expect(previousWordEndInPunctuation.getCursor()).toEqual({
+      line: 0,
+      col: 2,
+    });
+
+    const previousWordEndInWord = createEditor("foo.bar baz");
+    enterNormalAtStart(previousWordEndInWord);
+    sendKeys(previousWordEndInWord, ["w", "g", "E"]);
+
+    expect(previousWordEndInWord.getCursor()).toEqual({ line: 0, col: 0 });
+  });
+
+  it("supports ge and gE as operator motions", () => {
+    const deletePreviousWordEnd = createEditor("foo bar baz");
+    enterNormalAtStart(deletePreviousWordEnd);
+    sendKeys(deletePreviousWordEnd, ["w", "w", "d", "g", "e"]);
+
+    expect(deletePreviousWordEnd.getText()).toBe("foo baaz");
+    expect(deletePreviousWordEnd.getRegister()).toEqual({
+      text: "r b",
+      linewise: false,
+    });
+
+    const deletePreviousWordEndAcrossLine = createEditor("foo\nbar");
+    enterNormalAtStart(deletePreviousWordEndAcrossLine);
+    sendKeys(deletePreviousWordEndAcrossLine, ["j", "d", "g", "e"]);
+
+    expect(deletePreviousWordEndAcrossLine.getText()).toBe("foar");
+    expect(deletePreviousWordEndAcrossLine.getRegister()).toEqual({
+      text: "o\nb",
+      linewise: false,
+    });
+  });
 });
