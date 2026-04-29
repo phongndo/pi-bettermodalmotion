@@ -581,10 +581,7 @@ export class BetterModalMotionEditor extends CustomEditor {
     this.tui.requestRender();
   }
 
-  private handleCharSearchTarget(
-    key: string | undefined,
-    data: string,
-  ): void {
+  private handleCharSearchTarget(key: string | undefined, data: string): void {
     const pending = this.pendingCharSearch;
     if (!pending) return;
 
