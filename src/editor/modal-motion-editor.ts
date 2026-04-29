@@ -140,6 +140,11 @@ function isEditorBottomBorderLine(line: string): boolean {
   return /^─+$/u.test(text) || /^─── ↓ \d+ more ─*$/u.test(text);
 }
 
+function editorBottomBorderDetail(line: string): string {
+  const match = /^─── ↓ (\d+) more ─*$/u.exec(stripTerminalSequences(line));
+  return match ? `↓ ${match[1]} more` : "";
+}
+
 function findEditorBottomBorderLineIndex(lines: readonly string[]): number {
   for (let index = lines.length - 1; index > 0; index -= 1) {
     if (isEditorBottomBorderLine(lines[index] ?? "")) return index;
@@ -157,6 +162,27 @@ type EditorInternals = {
   };
   setCursorCol?: (col: number) => void;
 };
+
+type WritableEditorInternals = Required<EditorInternals>;
+
+function getWritableEditorInternals(
+  editor: CustomEditor,
+): WritableEditorInternals | undefined {
+  const internals = editor as unknown as EditorInternals;
+  if (!internals.state || typeof internals.setCursorCol !== "function") {
+    return undefined;
+  }
+
+  if (
+    !Array.isArray(internals.state.lines) ||
+    !Number.isFinite(internals.state.cursorLine) ||
+    !Number.isFinite(internals.state.cursorCol)
+  ) {
+    return undefined;
+  }
+
+  return internals as WritableEditorInternals;
+}
 
 type OperatorRange = VimOperatorRange;
 
@@ -216,10 +242,10 @@ export class BetterModalMotionEditor extends CustomEditor {
   constructor(
     tui: CustomEditorConstructorArgs[0],
     theme: CustomEditorConstructorArgs[1],
-    keybindings: CustomEditorConstructorArgs[2],
+    private readonly modalKeybindings: CustomEditorConstructorArgs[2],
     private readonly styleModeText: StyleModeText = (text) => text,
   ) {
-    super(tui, theme, keybindings);
+    super(tui, theme, modalKeybindings);
   }
 
   getMode(): ModalEditorMode {
@@ -233,6 +259,11 @@ export class BetterModalMotionEditor extends CustomEditor {
   handleInput(data: string): void {
     const legacyEscapeSuffixKey = getLegacyEscapeSuffixKey(data);
     if (this.mode === "insert" && legacyEscapeSuffixKey) {
+      if (this.isShowingAutocomplete()) {
+        super.handleInput("\x1b");
+        return;
+      }
+
       this.enterNormalModeFromInsert();
       this.handleNormalKey(legacyEscapeSuffixKey, legacyEscapeSuffixKey);
       return;
@@ -255,8 +286,7 @@ export class BetterModalMotionEditor extends CustomEditor {
 
     const key = getModalKey(data);
     if (!key) {
-      if (isTextInputData(data)) return;
-      super.handleInput(data);
+      this.handleUnhandledNormalInput(data);
       return;
     }
 
@@ -272,11 +302,13 @@ export class BetterModalMotionEditor extends CustomEditor {
     const lines = super.render(width);
     if (lines.length === 0) return lines;
 
-    lines[findEditorBottomBorderLineIndex(lines)] = buildModeBorderLine(
+    const borderIndex = findEditorBottomBorderLineIndex(lines);
+    lines[borderIndex] = buildModeBorderLine(
       width,
       this.getDisplayMode(),
       this.borderColor.bind(this),
       this.styleModeText,
+      editorBottomBorderDetail(lines[borderIndex] ?? ""),
     );
     return lines;
   }
@@ -424,8 +456,7 @@ export class BetterModalMotionEditor extends CustomEditor {
         return;
       default:
         this.pendingCount = "";
-        if (isTextInputData(data)) return;
-        super.handleInput(data);
+        this.handleUnhandledNormalInput(data);
     }
   }
 
@@ -472,12 +503,58 @@ export class BetterModalMotionEditor extends CustomEditor {
     if (!motionRange) {
       this.clearPendingState();
       this.mode = "normal";
-      if (!isTextInputData(data)) super.handleInput(data);
+      this.handleUnhandledNormalInput(data);
       this.tui.requestRender();
       return;
     }
 
     this.applyOperatorRange(operator, motionRange);
+  }
+
+  private handleUnhandledNormalInput(data: string): void {
+    if (isTextInputData(data)) return;
+    if (this.onExtensionShortcut?.(data)) return;
+    if (this.handlePassThroughAppAction(data)) return;
+
+    if (this.modalKeybindings.matches(data, "tui.input.submit")) {
+      super.handleInput(data);
+    }
+  }
+
+  private handlePassThroughAppAction(data: string): boolean {
+    if (this.modalKeybindings.matches(data, "app.clipboard.pasteImage")) {
+      this.onPasteImage?.();
+      return true;
+    }
+
+    if (this.modalKeybindings.matches(data, "app.exit")) {
+      if (this.getText().length === 0) {
+        const handler = this.onCtrlD ?? this.actionHandlers.get("app.exit");
+        handler?.();
+      }
+      return true;
+    }
+
+    if (this.modalKeybindings.matches(data, "app.interrupt")) {
+      if (this.isShowingAutocomplete()) {
+        super.handleInput(data);
+        return true;
+      }
+
+      const handler = this.onEscape ?? this.actionHandlers.get("app.interrupt");
+      handler?.();
+      return true;
+    }
+
+    for (const [action, handler] of this.actionHandlers) {
+      if (action === "app.exit" || action === "app.interrupt") continue;
+      if (this.modalKeybindings.matches(data, action)) {
+        handler();
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private enterNormalModeFromInsert(): void {
@@ -606,7 +683,7 @@ export class BetterModalMotionEditor extends CustomEditor {
     if (key === undefined) {
       this.clearPendingState();
       this.mode = "normal";
-      if (!isTextInputData(data)) super.handleInput(data);
+      this.handleUnhandledNormalInput(data);
       this.tui.requestRender();
       return;
     }
@@ -694,9 +771,9 @@ export class BetterModalMotionEditor extends CustomEditor {
   private setCursor(point: BufferPoint): void {
     const lines = this.getLines();
     const cursor = clampPoint(lines, point);
-    const internals = this as unknown as EditorInternals;
+    const internals = getWritableEditorInternals(this);
 
-    if (internals.state && typeof internals.setCursorCol === "function") {
+    if (internals) {
       internals.state.cursorLine = cursor.line;
       internals.setCursorCol(cursor.col);
       this.tui.requestRender();
@@ -807,7 +884,7 @@ export class BetterModalMotionEditor extends CustomEditor {
 
     this.clearPendingState();
     this.mode = "normal";
-    if (!isTextInputData(data)) super.handleInput(data);
+    this.handleUnhandledNormalInput(data);
     this.tui.requestRender();
   }
 

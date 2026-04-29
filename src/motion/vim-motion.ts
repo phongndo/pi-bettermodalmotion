@@ -4,6 +4,7 @@ import {
   comparePoints,
   ensureLines,
   firstNonBlankCol,
+  graphemeSegments,
   lineEndForInsert,
   lineEndForNormal,
   moveLeftInLine,
@@ -49,10 +50,6 @@ export interface ResolveVimMotionOptions {
   readonly desiredColumn?: number;
 }
 
-const graphemeSegmenter = new Intl.Segmenter(undefined, {
-  granularity: "grapheme",
-});
-
 interface WordSegment {
   readonly segment: string;
   readonly index: number;
@@ -60,7 +57,7 @@ interface WordSegment {
 }
 
 function graphemes(text: string): Intl.SegmentData[] {
-  return [...graphemeSegmenter.segment(text)];
+  return graphemeSegments(text);
 }
 
 function wordSegments(text: string): WordSegment[] {

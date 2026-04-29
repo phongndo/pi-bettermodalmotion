@@ -23,6 +23,46 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, {
   granularity: "grapheme",
 });
 
+const PASTE_MARKER_REGEX = /\[paste #\d+(?: (?:\+\d+ lines|\d+ chars))?\]/gu;
+
+export function graphemeSegments(text: string): Intl.SegmentData[] {
+  const result: Intl.SegmentData[] = [];
+  let previousEnd = 0;
+
+  for (const match of text.matchAll(PASTE_MARKER_REGEX)) {
+    const markerStart = match.index ?? 0;
+    const marker = match[0] ?? "";
+    if (!marker) continue;
+
+    if (markerStart > previousEnd) {
+      for (const segment of graphemeSegmenter.segment(
+        text.slice(previousEnd, markerStart),
+      )) {
+        result.push({
+          segment: segment.segment,
+          index: previousEnd + segment.index,
+          input: text,
+        });
+      }
+    }
+
+    result.push({ segment: marker, index: markerStart, input: text });
+    previousEnd = markerStart + marker.length;
+  }
+
+  if (previousEnd < text.length) {
+    for (const segment of graphemeSegmenter.segment(text.slice(previousEnd))) {
+      result.push({
+        segment: segment.segment,
+        index: previousEnd + segment.index,
+        input: text,
+      });
+    }
+  }
+
+  return result;
+}
+
 export function ensureLines(lines: readonly string[]): string[] {
   return lines.length > 0 ? [...lines] : [""];
 }
@@ -52,22 +92,69 @@ export function normalizeRange(range: BufferRange): BufferRange {
 }
 
 function graphemes(text: string): Intl.SegmentData[] {
-  return [...graphemeSegmenter.segment(text)];
+  return graphemeSegments(text);
 }
 
 export function previousGraphemeStart(text: string, col: number): number {
-  const before = text.slice(0, Math.max(0, Math.min(col, text.length)));
-  const segments = graphemes(before);
-  const previous = segments.at(-1);
-  return previous?.index ?? 0;
+  const safeCol = Math.max(0, Math.min(col, text.length));
+  let previousStart = 0;
+
+  for (const segment of graphemes(text)) {
+    const start = segment.index;
+    const end = start + segment.segment.length;
+    if (start >= safeCol) break;
+    if (safeCol <= end) return start;
+    previousStart = start;
+  }
+
+  return previousStart;
 }
 
 export function nextGraphemeEnd(text: string, col: number): number {
   const safeCol = Math.max(0, Math.min(col, text.length));
   if (safeCol >= text.length) return text.length;
-  const after = text.slice(safeCol);
-  const next = graphemes(after)[0];
-  return Math.min(text.length, safeCol + (next?.segment.length ?? 1));
+
+  for (const segment of graphemes(text)) {
+    const start = segment.index;
+    const end = start + segment.segment.length;
+    if (safeCol <= start) return end;
+    if (safeCol < end) return end;
+  }
+
+  return text.length;
+}
+
+function graphemeStartAtOrBefore(text: string, col: number): number {
+  const safeCol = Math.max(0, Math.min(col, text.length));
+  let previousStart = 0;
+
+  for (const segment of graphemes(text)) {
+    const start = segment.index;
+    const end = start + segment.segment.length;
+    if (start > safeCol) break;
+    if (safeCol < end) return start;
+    previousStart = start;
+  }
+
+  return previousStart;
+}
+
+function snapPointToSegmentBoundary(
+  lines: readonly string[],
+  point: BufferPoint,
+  bias: "start" | "end",
+): BufferPoint {
+  const clamped = clampPoint(lines, point);
+  const line = ensureLines(lines)[clamped.line] ?? "";
+
+  for (const segment of graphemes(line)) {
+    const start = segment.index;
+    const end = start + segment.segment.length;
+    if (clamped.col <= start || clamped.col >= end) continue;
+    return { line: clamped.line, col: bias === "start" ? start : end };
+  }
+
+  return clamped;
 }
 
 export function lastGraphemeStart(text: string): number {
@@ -84,7 +171,10 @@ export function clampPointToNormalCell(
   if (line.length === 0) return { line: clamped.line, col: 0 };
   return {
     line: clamped.line,
-    col: Math.min(clamped.col, lastGraphemeStart(line)),
+    col: graphemeStartAtOrBefore(
+      line,
+      Math.min(clamped.col, lastGraphemeStart(line)),
+    ),
   };
 }
 
@@ -133,10 +223,14 @@ export function getRangeText(
   range: BufferRange,
 ): string {
   const safeLines = ensureLines(lines);
-  const normalized = normalizeRange({
+  const clampedRange = normalizeRange({
     start: clampPoint(safeLines, range.start),
     end: clampPoint(safeLines, range.end),
   });
+  const normalized = {
+    start: snapPointToSegmentBoundary(safeLines, clampedRange.start, "start"),
+    end: snapPointToSegmentBoundary(safeLines, clampedRange.end, "end"),
+  };
   const text = bufferText(safeLines);
   return text.slice(
     pointToOffset(safeLines, normalized.start),
@@ -150,10 +244,14 @@ export function replaceRange(
   replacement: string,
 ): ReplaceRangeResult {
   const safeLines = ensureLines(lines);
-  const normalized = normalizeRange({
+  const clampedRange = normalizeRange({
     start: clampPoint(safeLines, range.start),
     end: clampPoint(safeLines, range.end),
   });
+  const normalized = {
+    start: snapPointToSegmentBoundary(safeLines, clampedRange.start, "start"),
+    end: snapPointToSegmentBoundary(safeLines, clampedRange.end, "end"),
+  };
   const text = bufferText(safeLines);
   const startOffset = pointToOffset(safeLines, normalized.start);
   const nextText =

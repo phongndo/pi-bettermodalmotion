@@ -1,4 +1,9 @@
-import { matchesKey, visibleWidth, type KeyId } from "@mariozechner/pi-tui";
+import {
+  matchesKey,
+  visibleWidth,
+  type AutocompleteProvider,
+  type KeyId,
+} from "@mariozechner/pi-tui";
 import { describe, expect, it } from "vitest";
 
 import type { KeybindingsManager } from "@mariozechner/pi-coding-agent";
@@ -27,6 +32,7 @@ const DEFAULT_KEY_BINDINGS: Record<string, KeyId | KeyId[]> = {
   "app.editor.external": "ctrl+g",
   "app.message.followUp": "alt+enter",
   "app.message.dequeue": "alt+up",
+  "tui.input.submit": "enter",
 };
 
 function createFakeKeybindings(): KeybindingsManager {
@@ -70,6 +76,39 @@ function sendKeys(
 
 function enterNormalAtStart(editor: BetterModalMotionEditor): void {
   sendKeys(editor, ["\x1b", "g", "g", "0"]);
+}
+
+function bracketedPaste(text: string): string {
+  return `\x1b[200~${text}\x1b[201~`;
+}
+
+async function flushAutocomplete(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function createAutocompleteProvider(): AutocompleteProvider {
+  return {
+    getSuggestions() {
+      return Promise.resolve({
+        prefix: "/",
+        items: [{ value: "/help", label: "/help" }],
+      });
+    },
+    applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+      const line = lines[cursorLine] ?? "";
+      const startCol = Math.max(0, cursorCol - prefix.length);
+      const nextLine = `${line.slice(0, startCol)}${item.value}${line.slice(
+        cursorCol,
+      )}`;
+      const nextLines = [...lines];
+      nextLines[cursorLine] = nextLine;
+      return {
+        lines: nextLines,
+        cursorLine,
+        cursorCol: startCol + item.value.length,
+      };
+    },
+  };
 }
 
 describe("modal motion editor helpers", () => {
@@ -138,6 +177,21 @@ describe("BetterModalMotionEditor", () => {
     expect(visibleWidth(normalLines.at(-1) ?? "")).toBe(24);
   });
 
+  it("does not erase the bottom scroll indicator when rendering the mode", () => {
+    const editor = createEditor(
+      Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n"),
+    );
+    enterNormalAtStart(editor);
+
+    const lines = editor.render(40);
+    const bottom = lines.at(-1) ?? "";
+
+    expect(bottom).toContain("NORMAL");
+    expect(bottom).toContain("↓");
+    expect(bottom).toContain("more");
+    expect(visibleWidth(bottom)).toBe(40);
+  });
+
   it("enters normal mode from insert mode without leaving the cursor past the last character", () => {
     const editor = createEditor("hello");
 
@@ -156,6 +210,22 @@ describe("BetterModalMotionEditor", () => {
     expect(editor.getCursor()).toEqual({ line: 0, col: 3 });
   });
 
+  it("cancels autocomplete before handling fast Escape plus key input", async () => {
+    const editor = createEditor();
+    editor.setAutocompleteProvider(createAutocompleteProvider());
+    editor.handleInput("/");
+    await flushAutocomplete();
+
+    expect(editor.isShowingAutocomplete()).toBe(true);
+
+    editor.handleInput("\x1bh");
+
+    expect(editor.isShowingAutocomplete()).toBe(false);
+    expect(editor.getMode()).toBe("insert");
+    expect(editor.getText()).toBe("/");
+    expect(editor.getCursor()).toEqual({ line: 0, col: 1 });
+  });
+
   it("enters normal mode from insert mode without splitting graphemes", () => {
     const editor = createEditor("a😀");
 
@@ -163,6 +233,22 @@ describe("BetterModalMotionEditor", () => {
 
     expect(editor.getMode()).toBe("normal");
     expect(editor.getCursor()).toEqual({ line: 0, col: 1 });
+  });
+
+  it("treats large paste markers as atomic normal-mode cells", () => {
+    const editor = createEditor();
+    const pastedText = "x".repeat(1001);
+    editor.handleInput(bracketedPaste(pastedText));
+
+    expect(editor.getText()).toMatch(/^\[paste #1 1001 chars\]$/u);
+    expect(editor.getExpandedText()).toBe(pastedText);
+
+    editor.handleInput("\x1b");
+    editor.handleInput("x");
+
+    expect(editor.getText()).toBe("");
+    expect(editor.getExpandedText()).toBe("");
+    expect(editor.getRegister()?.text).toMatch(/^\[paste #1 1001 chars\]$/u);
   });
 
   it("supports word deletion with dw", () => {
@@ -214,6 +300,35 @@ describe("BetterModalMotionEditor", () => {
     sendKeys(editor, ["l", "l"]);
 
     expect(editor.getCursor()).toEqual({ line: 1, col: 1 });
+  });
+
+  it("blocks native destructive editor shortcuts in normal mode", () => {
+    const editor = createEditor("hello world");
+    enterNormalAtStart(editor);
+    editor.handleInput("l");
+
+    for (const key of ["\x7f", "\x17", "\x15", "\x0b", "\x04"]) {
+      editor.handleInput(key);
+    }
+
+    expect(editor.getText()).toBe("hello world");
+    expect(editor.getCursor()).toEqual({ line: 0, col: 1 });
+    expect(editor.getRegister()).toBeUndefined();
+  });
+
+  it("cancels operator-pending mode without running native destructive shortcuts", () => {
+    const editor = createEditor("abc def");
+    enterNormalAtStart(editor);
+    sendKeys(editor, ["d", "\x7f"]);
+
+    expect(editor.getMode()).toBe("normal");
+    expect(editor.getText()).toBe("abc def");
+    expect(editor.getRegister()).toBeUndefined();
+
+    editor.handleInput("w");
+
+    expect(editor.getText()).toBe("abc def");
+    expect(editor.getCursor()).toEqual({ line: 0, col: 4 });
   });
 
   it("uses Vim-exclusive ranges for right and left character operators", () => {
