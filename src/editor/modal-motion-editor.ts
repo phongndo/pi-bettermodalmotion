@@ -822,11 +822,21 @@ export class BetterModalMotionEditor extends CustomEditor {
     const lines = this.getLines();
     const cursor = clampPoint(lines, this.getCursor());
     const insertAt = direction === "above" ? cursor.line : cursor.line + 1;
-    const nextLines = [...lines];
-    nextLines.splice(insertAt, 0, "");
+
     this.mode = "insert";
     this.clearPendingState();
-    this.setTextAndCursor(nextLines, { line: insertAt, col: 0 });
+    this.resetNormalDesiredColumn();
+
+    this.setCursor(
+      direction === "above"
+        ? { line: cursor.line, col: 0 }
+        : lineEndForInsert(lines, cursor),
+    );
+    super.handleInput("\n");
+
+    if (direction === "above") {
+      this.setCursor({ line: insertAt, col: 0 });
+    }
   }
 
   private goToLine(lineNumber: number | undefined): void {

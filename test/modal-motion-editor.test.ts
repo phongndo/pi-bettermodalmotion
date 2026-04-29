@@ -302,6 +302,36 @@ describe("BetterModalMotionEditor", () => {
     expect(editor.getCursor()).toEqual({ line: 1, col: 1 });
   });
 
+  it("opens a native insert line below with o", () => {
+    const editor = createEditor("one\ntwo");
+    enterNormalAtStart(editor);
+    editor.handleInput("o");
+
+    expect(editor.getMode()).toBe("insert");
+    expect(editor.getText()).toBe("one\n\ntwo");
+    expect(editor.getCursor()).toEqual({ line: 1, col: 0 });
+
+    editor.handleInput("X");
+
+    expect(editor.getText()).toBe("one\nX\ntwo");
+    expect(editor.getCursor()).toEqual({ line: 1, col: 1 });
+  });
+
+  it("opens a native insert line above with O", () => {
+    const editor = createEditor("one\ntwo");
+    enterNormalAtStart(editor);
+    sendKeys(editor, ["j", "O"]);
+
+    expect(editor.getMode()).toBe("insert");
+    expect(editor.getText()).toBe("one\n\ntwo");
+    expect(editor.getCursor()).toEqual({ line: 1, col: 0 });
+
+    editor.handleInput("X");
+
+    expect(editor.getText()).toBe("one\nX\ntwo");
+    expect(editor.getCursor()).toEqual({ line: 1, col: 1 });
+  });
+
   it("blocks native destructive editor shortcuts in normal mode", () => {
     const editor = createEditor("hello world");
     enterNormalAtStart(editor);
