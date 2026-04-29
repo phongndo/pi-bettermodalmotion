@@ -128,6 +128,25 @@ export function buildModeBorderLine(
   );
 }
 
+function stripTerminalSequences(text: string): string {
+  return text.replace(
+    /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|_[^\x07]*(?:\x07|\x1b\\))/gu,
+    "",
+  );
+}
+
+function isEditorBottomBorderLine(line: string): boolean {
+  const text = stripTerminalSequences(line);
+  return /^─+$/u.test(text) || /^─── ↓ \d+ more ─*$/u.test(text);
+}
+
+function findEditorBottomBorderLineIndex(lines: readonly string[]): number {
+  for (let index = lines.length - 1; index > 0; index -= 1) {
+    if (isEditorBottomBorderLine(lines[index] ?? "")) return index;
+  }
+  return lines.length - 1;
+}
+
 type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
 
 type EditorInternals = {
@@ -253,7 +272,7 @@ export class BetterModalMotionEditor extends CustomEditor {
     const lines = super.render(width);
     if (lines.length === 0) return lines;
 
-    lines[0] = buildModeBorderLine(
+    lines[findEditorBottomBorderLineIndex(lines)] = buildModeBorderLine(
       width,
       this.getDisplayMode(),
       this.borderColor.bind(this),
@@ -475,7 +494,6 @@ export class BetterModalMotionEditor extends CustomEditor {
           }
         : cursor,
     );
-    this.tui.requestRender(true);
   }
 
   private enterInsertMode(): void {

@@ -100,7 +100,7 @@ describe("modal motion editor helpers", () => {
     expect(getModeLabel("operator-pending")).toBe("OPERATOR");
   });
 
-  it("renders a width-safe top border with a styled mode label", () => {
+  it("renders a width-safe border with a styled mode label", () => {
     const line = buildModeBorderLine(
       24,
       "normal",
@@ -121,6 +121,23 @@ describe("modal motion editor helpers", () => {
 });
 
 describe("BetterModalMotionEditor", () => {
+  it("renders the modal label on the bottom border", () => {
+    const editor = createEditor("hello");
+
+    const insertLines = editor.render(24);
+
+    expect(insertLines[0]).not.toContain("INSERT");
+    expect(insertLines.at(-1)).toContain("INSERT");
+    expect(visibleWidth(insertLines.at(-1) ?? "")).toBe(24);
+
+    editor.handleInput("\x1b");
+    const normalLines = editor.render(24);
+
+    expect(normalLines[0]).not.toContain("NORMAL");
+    expect(normalLines.at(-1)).toContain("NORMAL");
+    expect(visibleWidth(normalLines.at(-1) ?? "")).toBe(24);
+  });
+
   it("enters normal mode from insert mode without leaving the cursor past the last character", () => {
     const editor = createEditor("hello");
 
