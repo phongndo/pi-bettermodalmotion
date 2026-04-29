@@ -246,6 +246,24 @@ function adjustOperatorWordEndOfLine(
   return lineEndForInsert(lines, start);
 }
 
+function moveRightOperatorEndInLine(
+  lines: readonly string[],
+  point: BufferPoint,
+  count: number,
+): BufferPoint {
+  const safeLines = ensureLines(lines);
+  const cursor = clampPointToNormalCell(safeLines, point);
+  const line = safeLines[cursor.line] ?? "";
+  let col = cursor.col;
+
+  for (let step = 0; step < safeCount(count); step += 1) {
+    if (col >= line.length) break;
+    col = nextGraphemeEnd(line, col);
+  }
+
+  return { line: cursor.line, col };
+}
+
 function makeMotion(
   start: BufferPoint,
   target: BufferPoint,
@@ -282,7 +300,9 @@ export function resolveVimMotion(
     case " ":
       return makeMotion(
         start,
-        moveRightInNormalLine(safeLines, start, normalizedCount),
+        options.operator
+          ? moveRightOperatorEndInLine(safeLines, start, normalizedCount)
+          : moveRightInNormalLine(safeLines, start, normalizedCount),
         "charwise",
         false,
       );

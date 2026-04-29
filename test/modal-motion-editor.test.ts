@@ -214,6 +214,36 @@ describe("BetterModalMotionEditor", () => {
 
     expect(deleteLeft.getText()).toBe("bc");
     expect(deleteLeft.getRegister()).toEqual({ text: "a", linewise: false });
+
+    const deleteAtLineEnd = createEditor("abc");
+    enterNormalAtStart(deleteAtLineEnd);
+    sendKeys(deleteAtLineEnd, ["l", "l", "d", "l"]);
+
+    expect(deleteAtLineEnd.getText()).toBe("ab");
+    expect(deleteAtLineEnd.getRegister()).toEqual({
+      text: "c",
+      linewise: false,
+    });
+
+    const changeAtLineEnd = createEditor("abc");
+    enterNormalAtStart(changeAtLineEnd);
+    sendKeys(changeAtLineEnd, ["l", "l", "c", "l", "X", "\x1b"]);
+
+    expect(changeAtLineEnd.getText()).toBe("abX");
+    expect(changeAtLineEnd.getRegister()).toEqual({
+      text: "c",
+      linewise: false,
+    });
+
+    const yankAtLineEnd = createEditor("abc");
+    enterNormalAtStart(yankAtLineEnd);
+    sendKeys(yankAtLineEnd, ["l", "l", "y", "l"]);
+
+    expect(yankAtLineEnd.getText()).toBe("abc");
+    expect(yankAtLineEnd.getRegister()).toEqual({
+      text: "c",
+      linewise: false,
+    });
   });
 
   it("uses Vim-inclusive ranges for end-of-line operators", () => {
