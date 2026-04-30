@@ -21,7 +21,7 @@ pi install git:github.com/phongndo/pi-modal-motion
 Install a pinned GitHub release/tag:
 
 ```bash
-pi install git:github.com/phongndo/pi-modal-motion@v0.1.1
+pi install git:github.com/phongndo/pi-modal-motion@v0.1.2
 ```
 
 Try without installing from this checkout:
