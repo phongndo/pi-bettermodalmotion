@@ -9,7 +9,7 @@ This scaffold starts from pi's `modal-editor.ts` example and turns it into a pac
 Install from npm:
 
 ```bash
-pi install npm:pi-modal-motion
+pi install npm:pi-modalmotion
 ```
 
 Install directly from GitHub:
@@ -21,7 +21,7 @@ pi install git:github.com/phongndo/pi-modal-motion
 Install a pinned GitHub release/tag:
 
 ```bash
-pi install git:github.com/phongndo/pi-modal-motion@v0.1.0
+pi install git:github.com/phongndo/pi-modal-motion@v0.1.1
 ```
 
 Try without installing from this checkout:
@@ -101,6 +101,7 @@ Then use pi normally. The prompt editor should show an `INSERT`/`NORMAL` indicat
 - `npm run test:coverage` — run Vitest with coverage
 - `npm run check` — run formatting, lint, type, and test checks
 - `npm run pack:check` — verify the package can be packed cleanly
+- `npm run pack:smoke` — pack the package, extract it, and verify pi loads the extension entrypoint
 - `npm run ci` — local CI-equivalent pipeline
 - `npm run dev:pi` — load the package directly into pi
 
@@ -109,12 +110,12 @@ Then use pi normally. The prompt editor should show an `INSERT`/`NORMAL` indicat
 ### CI
 
 `.github/workflows/ci.yml` runs on pull requests and pushes to `main`.
-It installs dependencies, runs the full quality pipeline, and verifies that `npm pack` succeeds.
+It installs dependencies, runs the full quality pipeline, verifies that `npm pack` succeeds, and smoke-tests the packed extension entrypoint.
 
 ### CD
 
 `.github/workflows/release.yml` runs on `v*` tags and on manual dispatch.
-It re-validates the package, publishes tagged releases to npm through trusted publishing, builds a package tarball, uploads it as a workflow artifact, and attaches it to a GitHub release when triggered by a tag. npm must have a trusted publisher configured for `phongndo/pi-modal-motion` and `release.yml`.
+It verifies the tag matches `package.json`, re-validates the package, smoke-tests the packed extension, builds a package tarball, uploads it as a workflow artifact, attaches it to a GitHub release when triggered by a tag, and publishes `pi-modalmotion` to npm. Publishing uses OIDC trusted publishing when configured and falls back to `NPM_TOKEN` for token-based publishing.
 
 ## Next steps
 

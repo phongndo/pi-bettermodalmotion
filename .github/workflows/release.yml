@@ -5,6 +5,12 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: "Publish the package version from this ref to npm"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: release-${{ github.ref }}
@@ -24,27 +30,37 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      - name: Use npm with trusted publishing support
+        run: npm install -g npm@^11.10.0
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          package_version=$(node -p "require('./package.json').version")
+          expected_tag="v${package_version}"
+
+          if [ "${GITHUB_REF_NAME}" != "${expected_tag}" ]; then
+            echo "::error::Release tag ${GITHUB_REF_NAME} does not match package version ${package_version}. Expected ${expected_tag}."
+            exit 1
+          fi
+
       - name: Verify release candidate
         run: npm run release:verify
 
-      - name: Publish to npm
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: npm publish --access public
-
       - name: Build release tarball
-        run: npm pack
+        run: npm pack --ignore-scripts
 
       - name: Upload tarball artifact
         uses: actions/upload-artifact@v6
         with:
-          name: pi-modal-motion-package
+          name: pi-modal-motion-${{ github.ref_name }}
           path: "*.tgz"
 
       - name: Create GitHub release
@@ -52,4 +68,21 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: "*.tgz"
+          fail_on_unmatched_files: true
           generate_release_notes: true
+          overwrite_files: true
+
+      - name: Publish to npm
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          package_name=$(node -p "require('./package.json').name")
+          package_version=$(node -p "require('./package.json').version")
+
+          if npm view "${package_name}@${package_version}" version >/dev/null 2>&1; then
+            echo "::notice::${package_name}@${package_version} is already published; skipping npm publish."
+            exit 0
+          fi
+
+          npm publish ./*.tgz --access public --ignore-scripts --provenance
