@@ -114,7 +114,7 @@ It installs dependencies, runs the full quality pipeline, and verifies that `npm
 ### CD
 
 `.github/workflows/release.yml` runs on `v*` tags and on manual dispatch.
-It re-validates the package, publishes to npm when `NPM_TOKEN` is configured, builds a package tarball, uploads it as a workflow artifact, and attaches it to a GitHub release when triggered by a tag.
+It re-validates the package, publishes tagged releases to npm through trusted publishing, builds a package tarball, uploads it as a workflow artifact, and attaches it to a GitHub release when triggered by a tag. npm must have a trusted publisher configured for `phongndo/pi-modal-motion` and `release.yml`.
 
 ## Next steps
 
